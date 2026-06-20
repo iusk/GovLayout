@@ -1,0 +1,11 @@
+node_modules/
+dist/
+build/
+.vite/
+*.log
+.env
+.env.local
+.DS_Store
+apps/api/prisma/dev.db
+apps/api/prisma/dev.db-journal
+.claude/settings.local.json

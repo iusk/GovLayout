@@ -1,0 +1,14 @@
+// Prisma schema for the U.S. Government Layout API.
+//
+// Stage 1: this file is intentionally empty of models — it only declares the datasource
+//          and generator so `prisma generate` succeeds and Stage 3 can drop models in.
+// Stage 3: Member, Justice, ExecutiveRole, and Court models are added here.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}

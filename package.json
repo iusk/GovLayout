@@ -1,0 +1,26 @@
+{
+  "name": "usgovlayout",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Simplified visualization of the three branches of the U.S. federal government.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,magenta \"npm:dev -w @usgov/api\" \"npm:dev -w @usgov/web\"",
+    "build": "npm run build -w @usgov/shared && npm run build -w @usgov/api && npm run build -w @usgov/web",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "concurrently": "^9.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.0",
+    "typescript": "^5.5.0"
+  }
+}
