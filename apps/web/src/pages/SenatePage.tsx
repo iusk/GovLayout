@@ -1,12 +1,11 @@
-import { Typography } from '@mui/material';
 import PageLayout from '../components/PageLayout';
+import ChamberView from '../components/chamber/ChamberView';
 
+/** Senate (100 members) rendered with the shared U-shape ChamberView. */
 export default function SenatePage() {
   return (
     <PageLayout title="Senate">
-      <Typography align="center" color="text.secondary">
-        Placeholder — 100 senators in a U-shape render here in Stage 2.
-      </Typography>
+      <ChamberView chamber="SENATE" />
     </PageLayout>
   );
 }

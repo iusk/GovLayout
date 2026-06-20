@@ -61,16 +61,51 @@ This starts:
 
 ## Useful scripts
 
-| Script              | What it does                                              |
-| ------------------- | --------------------------------------------------------- |
-| `npm run dev`       | Start both web and api concurrently                       |
-| `npm run build`     | Type-check and build all workspaces                       |
-| `npm run typecheck` | Run `tsc --noEmit` across all workspaces                  |
-| `npm run lint`      | ESLint across the repo                                    |
-| `npm run format`    | Prettier write across the repo                            |
+| Script                  | What it does                                          |
+| ----------------------- | ----------------------------------------------------- |
+| `npm run dev`           | Start both web and api concurrently                   |
+| `npm run build`         | Type-check and build all workspaces                   |
+| `npm run typecheck`     | Run `tsc --noEmit` across all workspaces              |
+| `npm run lint`          | ESLint across the repo                                |
+| `npm run format`        | Prettier write across the repo                        |
+| `npm run test -w @usgov/web` | Run the frontend Vitest smoke tests              |
+
+## API endpoints (Stage 2 — mock data)
+
+Every endpoint returns mock fixtures matching the shared types in
+`packages/shared/src/api.ts`. Stage 3 swaps the data source for Prisma/SQLite
+without changing these shapes.
+
+| Endpoint                          | Returns                                              |
+| --------------------------------- | ---------------------------------------------------- |
+| `GET /api/health`                 | `{ ok: true }`                                       |
+| `GET /api/branches`               | The three branches (Executive, Judicial, Legislative) |
+| `GET /api/executive`              | President + 5 essential roles                        |
+| `GET /api/judicial/courts`        | Court hierarchy (only Supreme Court clickable)       |
+| `GET /api/judicial/supreme-court` | The 9 sitting Justices                               |
+| `GET /api/legislative/chambers`   | Senate + House entries                               |
+| `GET /api/legislative/senate`     | 100 senators (party, pacPct, opensecretsUrl, photo)  |
+| `GET /api/legislative/house`      | 435 representatives (same fields)                    |
+
+Mock people and numbers are generated from a fixed seed (`apps/api/src/data/`),
+so the roster is stable across restarts.
 
 ## Current stage
 
-**Stage 1 — Architecture & Project Setup** is complete: monorepo skeleton, MUI dark theme with flag colors, all routes registered with placeholder pages, Express backend with `/api/health`, Prisma initialized with an empty schema, and the shared API contract in `packages/shared/src/api.ts`.
+**Stage 2 — Dynamic UI with Mocked Data** is complete: the full UI is built and
+clickable, powered entirely by mock data served from the backend (no hardcoded
+data in the frontend). Highlights:
 
-Next: **Stage 2 — Dynamic UI with Mocked Data** (pending user approval — see [ImplementationPlan.md](ImplementationPlan.md)).
+- Shared component library: `BranchButton`, `CourtButton`, `RepresentativeCard`,
+  `LoadingGrid`, `ErrorMessage`, `PageLayout`.
+- Every page loads via typed fetch hooks (`apps/web/src/api/`) — loading and
+  error/retry states included.
+- Senate (100) and House (435) render the U-shape dot chart (`ChamberView`):
+  two SVG halves that sit side by side on wide screens and stack vertically
+  below ~900px; a Party/Money dropdown recolors the dots; dots expand on hover
+  with a member card and open OpenSecrets on click.
+- Vitest smoke tests for `RepresentativeCard` and the money-color thresholds.
+
+The people and numbers are **fake** until Stage 3 wires in real data.
+
+Next: **Stage 3 — Real Data Integration** (pending user approval — see [ImplementationPlan.md](ImplementationPlan.md)).

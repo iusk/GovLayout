@@ -2,6 +2,7 @@
   "name": "usgovlayout",
   "private": true,
   "version": "0.0.1",
+  "type": "module",
   "description": "Simplified visualization of the three branches of the U.S. federal government.",
   "workspaces": [
     "packages/*",
