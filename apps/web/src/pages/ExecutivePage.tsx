@@ -5,12 +5,11 @@ import LoadingGrid from '../components/LoadingGrid';
 import ErrorMessage from '../components/ErrorMessage';
 import { useExecutive } from '../api/hooks';
 
-/** Responsive grid sized to match the role <RepresentativeCard>s below. */
 const roleGridSx = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(144px, 1fr))',
+  display: 'flex',
+  flexWrap: 'wrap',
+  justifyContent: 'center',
   gap: 4,
-  justifyItems: 'center',
 } as const;
 
 /** Executive branch: the President centered up top, essential roles below. */

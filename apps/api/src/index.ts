@@ -3,6 +3,7 @@ import cors from 'cors';
 import express, { type ErrorRequestHandler, type RequestHandler } from 'express';
 import { API_ROUTES } from '@usgov/shared';
 import { apiRouter } from './routes.js';
+import { startScheduler } from './sync/scheduler.js';
 
 const app = express();
 
@@ -14,7 +15,7 @@ const healthHandler: RequestHandler = (_req, res) => {
 };
 app.get(API_ROUTES.health, healthHandler);
 
-// Branch / executive / judicial / legislative endpoints (mock data in Stage 2).
+// Branch / executive / judicial / legislative endpoints (Prisma-backed in Stage 3).
 app.use(apiRouter);
 
 const notFoundHandler: RequestHandler = (req, res) => {
@@ -32,4 +33,7 @@ app.use(errorHandler);
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, () => {
   console.log(`[api] listening on http://localhost:${port}`);
+  // Scheduled auto-sync (deployed only; controlled by SYNC_CRON). No-op locally
+  // unless SYNC_CRON is set — local refreshes use the "Sync Data" button.
+  startScheduler();
 });

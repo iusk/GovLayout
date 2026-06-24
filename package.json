@@ -13,7 +13,12 @@
     "build": "npm run build -w @usgov/shared && npm run build -w @usgov/api && npm run build -w @usgov/web",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "sync:all": "npm run sync:all -w @usgov/api",
+    "sync:congress": "npm run sync:congress -w @usgov/api",
+    "sync:fec": "npm run sync:fec -w @usgov/api",
+    "sync:judicial": "npm run sync:judicial -w @usgov/api",
+    "sync:executive": "npm run sync:executive -w @usgov/api"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.0.0",

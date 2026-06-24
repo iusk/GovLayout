@@ -93,10 +93,40 @@ export interface MembersResponse {
   members: Member[];
 }
 
+// ---------- Data sync (admin) ----------
+
+/**
+ * Runtime config the frontend reads to decide what to show. `allowSync` gates
+ * the local-only "Sync Data" button; `lastSyncAt` is the last completed full
+ * sync (ISO string) or null.
+ */
+export interface AppConfigResponse {
+  allowSync: boolean;
+  syncing: boolean;
+  lastSyncAt: string | null;
+}
+
+/** Result of one sync job within a full-sync run. */
+export interface SyncJobResult {
+  key: string;
+  label: string;
+  status: 'ok' | 'skipped' | 'error';
+  message: string;
+}
+
+/** Response from POST /api/sync. */
+export interface SyncResponse {
+  started: boolean;
+  reason?: string;
+  results?: SyncJobResult[];
+}
+
 // ---------- Endpoint paths (single source of truth) ----------
 
 export const API_ROUTES = {
   health: '/api/health',
+  config: '/api/config',
+  sync: '/api/sync',
   branches: '/api/branches',
   executive: '/api/executive',
   judicialCourts: '/api/judicial/courts',

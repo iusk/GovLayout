@@ -125,39 +125,86 @@ User approves the visual + interaction design before any real data is wired in.
 
 **Goal:** Replace mock fixtures with real data pulled from public APIs and cached in SQLite via Prisma. The endpoints from Stage 2 keep their shapes — the frontend should require **no changes**.
 
+### Data-source reality check (updated during Stage 3 implementation)
+
+The original plan named the **OpenSecrets API** and the **ProPublica Congress API** as the money / member-enrichment sources. Both have since been retired:
+
+- **ProPublica Congress API** — no longer issuing keys; effectively shut down. **Dropped.** Congress.gov alone covers the member roster we need.
+- **OpenSecrets API** (`candSummary`) — the legacy key-based API has been retired in favor of bulk data. **Replaced** by the **OpenFEC API** (`api.open.fec.gov`), the FEC's official, free, actively-maintained campaign-finance API. We still link each member out to their **opensecrets.org** profile page (that website is alive; only its old API is gone).
+
+So the live data sources for Stage 3 are:
+
+| Data | Source | Notes |
+|---|---|---|
+| Member roster, party, state, district, photo | **Congress.gov API** v3 | Free key from api.data.gov. |
+| PAC contribution % (`pacPct`) | **OpenFEC API** | Free key from api.data.gov. `pacPct = other_political_committee_contributions / receipts`. |
+| OpenSecrets profile link | derived URL | Built from member name/state; opensecrets.org website still works. |
+| Justice / executive **roster, names, photos** | **Wikidata** (SPARQL + entity API, `P18`) | Queried live; gated by a curated Q-id allowlist (see below). Lower-court hierarchy stays a curated seed (fixed structure). |
+
+### Required API keys & how to get them
+
+Both keys below are **free** and issued instantly. One key from **api.data.gov actually works for both** Congress.gov and OpenFEC (it is a shared gateway), but the code reads them as separate env vars so you can rotate them independently.
+
+1. **`CONGRESS_API_KEY`** — Congress.gov member data.
+   - Sign up at **https://api.congress.gov/sign-up/** (or any api.data.gov key works).
+   - You get the key by email immediately. Rate limit: ~5,000 requests/hour. The full member roster is a few hundred requests, so one sync run is well within limits.
+2. **`FEC_API_KEY`** — OpenFEC campaign-finance data (replaces the dead `OPENSECRETS_API_KEY`).
+   - Sign up at **https://api.open.fec.gov/developers/** ("Sign up for an API key" → api.data.gov form).
+   - Issued instantly by email. Rate limit: **1,000 requests/hour**. The money sync makes ~2 requests per member (≈1,070 total for all 535), so it must throttle to stay under the cap and is **resumable** across runs.
+   - Without a key you may use the literal value `DEMO_KEY`, but it is rate-limited to ~30 req/hour and 50/day — only useful for a tiny spot-check, not a full sync.
+
+`OPENSECRETS_API_KEY` and `PROPUBLICA_API_KEY` are **removed** from `.env.example` (the services are gone). `FEC_API_KEY` is added.
+
 ### Steps
 
 1. **Prisma schema** in `apps/api/prisma/schema.prisma`:
-   - `Member` — `id`, `bioguideId`, `fullName`, `party`, `state`, `district` (nullable, House-only), `chamber` (`SENATE` | `HOUSE`), `photoUrl`, `opensecretsId`, `opensecretsUrl`, `pacPct`, `lastSyncedAt`.
-   - `Justice` — `id`, `fullName`, `photoUrl`, `appointedBy`, `year`, `source`.
-   - `ExecutiveRole` — `id`, `roleKey`, `roleTitle`, `holderName`, `photoUrl`, `source`.
-   - `Court` — `id`, `name`, `level`, `parentCourtId` (nullable), `clickable`.
+   - `Member` — `id`, `bioguideId`, `fullName`, `party`, `state`, `district` (nullable, House-only), `chamber` (`SENATE` | `HOUSE`), `photoUrl`, `fecCandidateId` (nullable), `opensecretsUrl`, `pacPct` (nullable until the money sync runs), `lastSyncedAt`, `moneySyncedAt` (nullable).
+   - `Justice` — `id`, `fullName`, `photoUrl`, `appointedBy`, `year`, `source`, `order` (display order).
+   - `ExecutiveRole` — `id`, `roleKey`, `roleTitle`, `holderName`, `photoUrl`, `source`, `isPresident`, `order`.
+   - `Court` — `id`, `name`, `level`, `parentCourtId` (nullable), `clickable`, `order`.
+   - `SyncState` — `key` (e.g. `congress`, `fec`), `lastRunAt`, `cursor` (nullable, for resume), `status`. Tracks idempotent/resumable sync runs and powers the caching policy.
    - Generate the Prisma client and run the initial migration.
-2. **Sync jobs** under `apps/api/src/sync/`, each idempotent and runnable independently via npm scripts (`npm run sync:congress`, `sync:opensecrets`, `sync:executive`, `sync:judicial`, or `sync:all`):
-   - **`syncCongress.ts`** — Congress.gov API → upsert all Senate (100) + House (435) members with photo URLs and bioguide IDs. ProPublica is used as a fallback/enrichment source for fields Congress.gov doesn't return cleanly.
-   - **`syncOpenSecrets.ts`** — OpenSecrets API (`candSummary` or equivalent) → fetch contribution breakdown per member, compute `pacPct` = % of receipts from PACs, store `opensecretsUrl`. Throttle to respect rate limits. Resume-from-last-bioguideId on failure.
-   - **`syncJudicial.ts`** — The 9 current Justices come from a small curated JSON seed file (only 9 entries, changes rarely); their photos resolve from Wikipedia/Wikidata via the `P18` image property. The lower-court hierarchy is also a small seed file.
-   - **`syncExecutive.ts`** — Curated seed file for the President + VP + Big 4 *role titles* (State, Treasury, Defense, AG). Current holder names + photos resolve from Wikipedia/Wikidata. Cabinet changes infrequently; a manual re-run is acceptable when there is a change.
-3. **Endpoint rewrite:** the routes from Stage 2 now read from Prisma instead of returning fixtures. Shapes match the Stage 1 shared types, so the frontend remains untouched.
-4. **Photo handling:** photo URLs are stored in the DB pointing to upstream sources. Add a `GET /api/photos/:bioguideId` thin proxy that 302-redirects to the cached URL, falling back to a generic silhouette SVG on 404. This isolates the frontend from upstream URL churn.
+2. **Sync jobs** under `apps/api/src/sync/`, each idempotent and runnable independently via npm scripts (`npm run sync:congress`, `sync:fec`, `sync:executive`, `sync:judicial`, or `sync:all`):
+   - **`syncCongress.ts`** — Congress.gov API (`/v3/member/congress/{congress}?currentMember=true`, paginated) → upsert all current Senate (~100) + House (~435) members with `bioguideId`, name, `party` (mapped to `D`/`R`/`I`), `state`, `district`, and `photoUrl` (from each member's `depiction.imageUrl`). Derive `opensecretsUrl` from name. ProPublica is **not** used (API dead).
+   - **`syncFec.ts`** (replaces `syncOpenSecrets.ts`) — OpenFEC API → for each member, resolve a `fecCandidateId` via `/v1/candidates/search/` (by name + state + office), then `/v1/candidate/{id}/totals/` for the latest cycle → compute `pacPct = other_political_committee_contributions / receipts * 100` (clamped 0–100; null if no receipts). Throttle to stay under 1,000 req/hr. **Resume** from `SyncState.cursor` (last processed bioguideId) on failure or rate-limit. The npm script alias `sync:opensecrets` is kept pointing here for continuity with the plan.
+   - **`syncJudicial.ts`** — The 9 current Justices come from a small curated seed file in-repo (only 9 entries, changes rarely); their photos resolve from Wikipedia/Wikidata via the `P18` image property, falling back to a seed-provided URL. The lower-court hierarchy is also a small seed file.
+   - **`syncExecutive.ts`** — Curated seed file for the President + VP + Big 4 *role titles* (State, Treasury, Defense, AG) and current holder names. Photos resolve from Wikipedia/Wikidata, falling back to a seed-provided URL. Cabinet changes infrequently; a manual re-run is acceptable when there is a change.
+3. **Endpoint rewrite:** the routes from Stage 2 now read from Prisma instead of returning fixtures. Shapes match the Stage 1 shared types, so the frontend remains untouched. Where the DB has not yet been synced (e.g. `pacPct` still null), serve a sensible default so the UI never breaks.
+4. **Photo handling:** photo URLs are stored in the DB pointing to upstream sources. Add a `GET /api/photos/:bioguideId` thin proxy that 302-redirects to the cached URL, falling back to a generic silhouette SVG on 404 / missing photo. This isolates the frontend from upstream URL churn.
 5. **API key + env management:**
-   - `.env` holds `CONGRESS_API_KEY`, `OPENSECRETS_API_KEY`, `PROPUBLICA_API_KEY`. Real `.env` is gitignored; `.env.example` is committed.
-   - README documents how to obtain each key.
-6. **Caching policy:**
-   - Members: refresh every 7 days.
-   - OpenSecrets percentages: refresh every 30 days.
+   - `.env` holds `CONGRESS_API_KEY` and `FEC_API_KEY`. Real `.env` is gitignored; `.env.example` is committed with the key names and a pointer to the sign-up URLs.
+   - README documents how to obtain each key (see links above).
+6. **Caching policy** (enforced via `SyncState.lastRunAt`; each sync is skipped if run again within its window unless `--force`):
+   - Members (Congress.gov): refresh every 7 days.
+   - Money percentages (OpenFEC): refresh every 30 days.
    - Justices / Executive: manual trigger only.
-   - Serve stale-on-error so the site keeps working if an upstream is down.
+   - **Serve stale-on-error**: endpoints always read whatever is in the DB, so the site keeps working even if an upstream is down or a sync is mid-failure.
 7. **First real-data run:** execute `npm run sync:all`; spot-check 5 senators and 5 representatives against opensecrets.org to confirm the `pacPct` math and link correctness.
+
+### Data flow (revised during Stage 3)
+
+The data flow was tightened so that **all UI data comes from the DB**, the DB is filled **only by sync jobs that call upstream APIs**, and refresh is automatic when deployed / one-click when local:
+
+1. **UI → DB only.** Every endpoint reads exclusively from SQLite via Prisma (`repo.ts`). The UI never calls an upstream directly. This gives stale-on-error for free: if an upstream is down, the site still serves the last successful sync.
+2. **DB ← APIs only (no hardcoded rosters).** Even rarely-changing data is API-sourced:
+   - **Justices & executive roster + names + photos** come live from **Wikidata** (SPARQL for "who currently holds this office", entity API for label + `P18` photo). Wikidata is community-edited and returns vandalism (its current-SCOTUS query also yields "Bart Simpson"; executive offices yield fictional TV characters), so each result is **validated against a curated allowlist of expected person Q-ids** (`src/sync/seeds/`). The allowlist holds only stable identifiers + historical constants (appointer/year) — no names or photos. When an office changes hands, update one Q-id and the name/photo follow from the API.
+   - Only the **lower-court hierarchy** stays a curated seed (it's fixed structure, not a roster).
+3. **Scheduled auto-sync when deployed.** Setting `SYNC_CRON` (a 5-field cron expression, with optional `SYNC_TZ`) enables a `node-cron` job that runs a full sync on a configurable schedule, honoring each job's cache window. Unset = disabled.
+4. **One-click sync when local.** A floating bottom-left **"Sync Data"** button (frontend) calls `POST /api/sync`, which runs a forced full sync in-process and reloads the page. The button only renders under the Vite dev server (`import.meta.env.DEV`) **and** only when the API reports `allowSync` via `GET /api/config`. In production the sync endpoint is disabled by default (`ENABLE_SYNC_ENDPOINT=true` to override), so the deployed app has no button and relies on the schedule.
+5. **One sync at a time.** A process-wide coordinator (`coordinator.ts`) ensures the scheduler and the manual button can't run concurrently (a second trigger returns `409`), preventing FEC resume-cursor collisions.
+
+New endpoints: `GET /api/config` (`{ allowSync, syncing, lastSyncAt }`), `POST /api/sync` (`{ started, results[] }`).
+New env vars: `SYNC_CRON`, `SYNC_TZ`, `ENABLE_SYNC_ENDPOINT`, `NODE_ENV`.
 
 ### Deliverables
 
-- The site from Stage 2, now showing real members, real photos, real money percentages, real OpenSecrets links.
-- A documented refresh process the user can run periodically.
+- The site from Stage 2, now showing real members, real photos, real money percentages (from the FEC), real OpenSecrets profile links, and an API-sourced (Wikidata, allowlist-gated) Supreme Court + Executive roster.
+- All UI data served from the DB; DB filled only by API-calling sync jobs.
+- Refresh automated on a configurable schedule when deployed, plus a one-click local "Sync Data" button.
 
 ### Human checkpoint
 
-User spot-checks accuracy (a handful of members, a few justices, the President + cabinet) and confirms the site is ready for use.
+User obtains the two free API keys, runs `npm run sync:all` (or clicks "Sync Data" locally), then spot-checks accuracy (a handful of members, a few justices, the President + cabinet) and confirms the site is ready for use.
 
 ---
 

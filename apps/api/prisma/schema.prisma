@@ -1,8 +1,12 @@
 // Prisma schema for the U.S. Government Layout API.
 //
-// Stage 1: this file is intentionally empty of models — it only declares the datasource
-//          and generator so `prisma generate` succeeds and Stage 3 can drop models in.
-// Stage 3: Member, Justice, ExecutiveRole, and Court models are added here.
+// Stage 3: real data is synced from upstream APIs into these models and cached
+// in SQLite. The API endpoints read exclusively from here, so the site keeps
+// working (stale-on-error) even when an upstream is down or a sync is mid-run.
+//
+// Field names intentionally mirror the shared API contract in
+// `packages/shared/src/api.ts` so route handlers map DB rows -> responses with
+// almost no translation.
 
 generator client {
   provider = "prisma-client-js"
@@ -11,4 +15,70 @@ generator client {
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
+}
+
+// A member of Congress (Senate or House). Roster/party/state/district/photo come
+// from the Congress.gov API; pacPct + fecCandidateId come from the OpenFEC API.
+model Member {
+  id             String   @id // == bioguideId; matches the shared `Member.id`
+  bioguideId     String   @unique
+  fullName       String
+  party          String // "D" | "R" | "I"
+  state          String
+  district       Int? // null for senators
+  chamber        String // "SENATE" | "HOUSE"
+  photoUrl       String
+  fecCandidateId String? // resolved from OpenFEC candidate search
+  opensecretsUrl String
+  pacPct         Float? // % of receipts from PACs; null until the money sync runs
+  lastSyncedAt   DateTime @default(now()) // last Congress.gov sync
+  moneySyncedAt  DateTime? // last OpenFEC money sync
+
+  @@index([chamber])
+}
+
+// One of the nine current Supreme Court Justices. Curated seed roster; photos
+// resolved from Wikidata at sync time.
+model Justice {
+  id          String @id
+  fullName    String
+  photoUrl    String
+  appointedBy String
+  year        Int
+  source      String // "seed" | "wikidata"
+  order       Int    // display order on the Supreme Court page
+}
+
+// A top executive-branch role (President + VP + Big 4 cabinet). Role titles are
+// curated; holder names from seed, photos resolved from Wikidata.
+model ExecutiveRole {
+  id          String  @id
+  roleKey     String  @unique
+  roleTitle   String
+  holderName  String
+  photoUrl    String
+  source      String // "seed" | "wikidata"
+  isPresident Boolean @default(false)
+  order       Int // display order among the non-president roles
+}
+
+// A level in the federal court hierarchy. Only the Supreme Court is clickable.
+model Court {
+  id            String  @id
+  name          String
+  level         String // "supreme" | "appeals" | "district"
+  parentCourtId String?
+  clickable     Boolean @default(false)
+  order         Int
+}
+
+// Bookkeeping for idempotent, resumable syncs and the caching policy. One row
+// per sync job keyed by name (e.g. "congress", "fec", "judicial", "executive").
+model SyncState {
+  key       String    @id
+  lastRunAt DateTime?
+  cursor    String? // last processed bioguideId, for resume-on-failure
+  status    String    @default("idle") // "idle" | "running" | "ok" | "error"
+  message   String?
+  updatedAt DateTime  @updatedAt
 }
